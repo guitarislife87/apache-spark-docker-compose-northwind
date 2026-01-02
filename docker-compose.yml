@@ -1,0 +1,112 @@
+# Base Version From:  https://clynt.com/blog/data-engineering/apache-spark/apache-spark-with-docker#quick-start-single-node-spark-cluster
+
+services:
+  spark-master:
+    image: apache/spark
+    container_name: spark-master
+    hostname: spark-master
+    command: /opt/spark/bin/spark-class org.apache.spark.deploy.master.Master
+    ports:
+      - "8080:8080" # Spark UI
+      - "7077:7077" # Spark master port
+      - "4040-4050:4040-4050"
+    environment:
+      - SPARK_MODE=master
+      - SPARK_MASTER_HOST=spark-master
+      - SPARK_MASTER_PORT=7077
+      - SPARK_MASTER_WEBUI_PORT=8080
+    volumes:
+      - ./spark-data:/opt/spark-data
+      - ./spark-apps:/opt/spark-apps
+      - ./jars:/opt/spark/addon-jars
+      - ./conf:/opt/spark/conf
+      - ./spark-events:/opt/spark/spark-events
+    networks:
+      - spark-network
+    deploy:
+      resources:
+        limits:
+          cpus: "4"
+          memory: 8G
+        reservations:
+          cpus: "2"
+          memory: 4G
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    restart: unless-stopped
+
+  spark-worker:
+    image: apache/spark
+    command: /opt/spark/bin/spark-class org.apache.spark.deploy.worker.Worker spark://spark-master:7077
+    environment:
+      - SPARK_WORKER_CORES=2
+      - SPARK_WORKER_MEMORY=4g
+    volumes:
+      - ./spark-data:/opt/spark-data
+      - ./spark-apps:/opt/spark-apps
+      - ./spark-events:/opt/spark/spark-events
+      - ./jars:/opt/spark/addon-jars
+      - ./conf:/opt/spark/conf
+    depends_on:
+      spark-master:
+        condition: service_healthy
+    networks:
+      - spark-network
+    deploy:
+      replicas: 3
+      resources:
+        limits:
+          cpus: "4"
+          memory: 6G
+        reservations:
+          cpus: "2"
+          memory: 4G
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 3
+    restart: unless-stopped
+
+  spark-history:
+    image: apache/spark
+    container_name: spark-history
+    hostname: spark-history
+    command: /opt/spark/bin/spark-class org.apache.spark.deploy.history.HistoryServer
+    environment:
+      - SPARK_HISTORY_OPTS=-Dspark.history.fs.logDirectory=/opt/spark/spark-events
+    ports:
+      - "18080:18080"
+    volumes:
+      - ./spark-events:/opt/spark/spark-events
+    depends_on:
+      - spark-master
+    networks:
+      - spark-network
+
+  postgres:
+    image: postgres:18.1-alpine
+    restart: always
+    container_name: postgres-db
+    hostname: postgres-db
+    environment:
+      - POSTGRES_DB=analytics
+      - POSTGRES_USER=spark_user
+      - POSTGRES_PASSWORD=spark_password
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgrsql/data
+      - ./init-db.sql:/docker-entrypoint-initdb.d/init-db.sql
+    networks:
+      - spark-network
+
+networks:
+  spark-network:
+    driver: bridge
+
+volumes:
+  postgres_data:
