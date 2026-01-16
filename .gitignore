@@ -1,3 +1,4 @@
-spark-data
-spark-events
-jars
+spark/data/*
+spark/events/*
+spark/logs/*
+spark/jars/*
